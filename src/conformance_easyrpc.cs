@@ -12,26 +12,24 @@ namespace EasyRpc {
     public ConformanceServiceClient(Transport t) { _t = t; }
 
     public async Task<HealthResponse> health(HealthRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Health", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/v1/health", Body = req.ToByteArray() });
       if (res.Error != null) throw res.Error;
       return HealthResponse.Parser.ParseFrom(res.Body);
     }
 
     public async Task<EchoResponse> echo(EchoRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Echo", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/v1/echo", Body = req.ToByteArray() });
       if (res.Error != null) throw res.Error;
       return EchoResponse.Parser.ParseFrom(res.Body);
     }
 
     public async IAsyncEnumerable<CountResponse> count(CountRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Count", Body = req.ToByteArray() });
-      await foreach (var m in stream) {
-        yield return CountResponse.Parser.ParseFrom(m);
-      }
+      var stream = await _t.OpenStream(new Request { Url = "/v1/count", Body = req.ToByteArray() });
+      await foreach (var m in stream) { yield return CountResponse.Parser.ParseFrom(m); }
     }
 
     public async Task<FailResponse> fail(FailRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Fail", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/v1/fail", Body = req.ToByteArray() });
       if (res.Error != null) throw res.Error;
       return FailResponse.Parser.ParseFrom(res.Body);
     }
