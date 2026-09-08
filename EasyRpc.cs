@@ -60,10 +60,12 @@ namespace EasyRpc
     public class HttpClientTransport : Transport
     {
         private readonly HttpClient _client;
-        public HttpClientTransport() { _client = new HttpClient(); }
+        public string Base { get; set; } = "";
+        public HttpClientTransport(string baseUrl = "") { _client = new HttpClient(); Base = baseUrl; }
+        private string _url(string u) => u.StartsWith("http") ? u : Base + u;
         public async Task<Response> Send(Request req)
         {
-            var msg = new HttpRequestMessage(new HttpMethod(req.Method), req.Url);
+            var msg = new HttpRequestMessage(new HttpMethod(req.Method), _url(req.Url));
             if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
             msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/proto");
             var resp = await _client.SendAsync(msg);
@@ -73,7 +75,7 @@ namespace EasyRpc
         }
         public async Task<IAsyncEnumerable<byte[]>> OpenStream(Request req)
         {
-            var msg = new HttpRequestMessage(new HttpMethod(req.Method), req.Url);
+            var msg = new HttpRequestMessage(new HttpMethod(req.Method), _url(req.Url));
             if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
             msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/connect+proto");
             var resp = await _client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead);
