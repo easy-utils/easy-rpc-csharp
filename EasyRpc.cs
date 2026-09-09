@@ -37,11 +37,13 @@ namespace EasyRpc
     {
         public static int HttpStatus(int code) => code switch
         {
-            3 => 400, 5 => 404, 7 => 403, 8 => 429, 16 => 401, 14 => 503, _ => 500
+            1 => 499, 3 => 400, 4 => 504, 5 => 404, 6 => 409, 7 => 403, 8 => 429,
+            9 => 400, 10 => 409, 11 => 400, 12 => 501, 14 => 503, 16 => 401, _ => 500
         };
         public static int ConnectFromStatus(int status) => status switch
         {
-            400 => 3, 404 => 5, 403 => 7, 401 => 16, 429 => 8, 503 => 14, _ => 13
+            400 => 3, 404 => 5, 403 => 7, 401 => 16, 429 => 8, 503 => 14,
+            409 => 10, 504 => 4, 501 => 12, 499 => 1, _ => 13
         };
         public const byte EndStream = 0x02;
         public static byte[] Frame(byte[] payload, bool end = false)
@@ -60,17 +62,61 @@ namespace EasyRpc
         Task<IAsyncEnumerable<byte[]>> OpenStream(Request req);
     }
 
+    /// <summary>
+    /// Cross-platform HTTP client transport backed by System.Net.Http.HttpClient +
+    /// SocketsHttpHandler. On .NET MAUI/Android/iOS the platform handler is used
+    /// automatically (Android handler / NSUrlSessionHandler). Protocol coverage:
+    ///   - HTTP/1.1 + HTTP/2 (over TLS, ALPN)
+    ///   - HTTP/3 via .NET msquic (Linux/Windows) or the platform handler (iOS).
+    /// Cleartext h2c is NOT exposed (like Go/Python/Kotlin/Dart it would need a
+    /// custom connect layer); use h2 over TLS (https://) or h3.
+    /// Choose the version with httpVersion + versionPolicy.
+    /// </summary>
     public class HttpClientTransport : Transport
     {
         private readonly HttpClient _client;
         public string Base { get; set; } = "";
-        public HttpClientTransport(string baseUrl = "") { _client = new HttpClient(); Base = baseUrl; }
+        public Version Version { get; set; } = new Version(2, 0);
+        public HttpVersionPolicy VersionPolicy { get; set; } = HttpVersionPolicy.RequestVersionOrLower;
+
+        public HttpClientTransport(string baseUrl = "", Version? version = null,
+            HttpVersionPolicy policy = HttpVersionPolicy.RequestVersionOrLower)
+        {
+            _client = new HttpClient(new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            });
+            Base = baseUrl;
+            if (version != null) Version = version;
+            VersionPolicy = policy;
+        }
+
+        // Convenience builders: pick protocol preference.
+        public static HttpClientTransport H2(string baseUrl = "") =>
+            new(baseUrl, new Version(2, 0), HttpVersionPolicy.RequestVersionOrLower);
+        public static HttpClientTransport H3(string baseUrl = "") =>
+            new(baseUrl, new Version(3, 0), HttpVersionPolicy.RequestVersionOrHigher);
+        public static HttpClientTransport H1(string baseUrl = "") =>
+            new(baseUrl, new Version(1, 1), HttpVersionPolicy.RequestVersionOrLower);
+
         private string _url(string u) => u.StartsWith("http") ? u : Base + u;
+
+        private HttpRequestMessage BuildMessage(Request req, bool stream)
+        {
+            var msg = new HttpRequestMessage(new HttpMethod(req.Method), _url(req.Url))
+            {
+                Version = Version,
+                VersionPolicy = VersionPolicy,
+            };
+            if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
+            var ct = stream ? "application/connect+proto" : "application/proto";
+            msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ct);
+            return msg;
+        }
+
         public async Task<Response> Send(Request req)
         {
-            var msg = new HttpRequestMessage(new HttpMethod(req.Method), _url(req.Url));
-            if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
-            msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/proto");
+            var msg = BuildMessage(req, false);
             var resp = await _client.SendAsync(msg);
             var body = await resp.Content.ReadAsByteArrayAsync();
             var s = (int)resp.StatusCode;
@@ -78,9 +124,7 @@ namespace EasyRpc
         }
         public async Task<IAsyncEnumerable<byte[]>> OpenStream(Request req)
         {
-            var msg = new HttpRequestMessage(new HttpMethod(req.Method), _url(req.Url));
-            if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
-            msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/connect+proto");
+            var msg = BuildMessage(req, true);
             var resp = await _client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead);
             var stream = await resp.Content.ReadAsStreamAsync();
             return DeFrame(stream);
