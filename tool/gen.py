@@ -105,7 +105,11 @@ def main():
         base = f.name[:-6]
         proto_pkg = (f.package or 'easyrpc')
         # google.protobuf / google.api style: convert each dot-segment to Pascal.
-        msg_ns = '.'.join(pascal(x) for x in proto_pkg.split('.') if x)
+        msg_ns = os.environ.get('EASYRPC_CS_MSG_NS')
+        if msg_ns is None and f.HasField('options') and f.options.HasField('csharp_namespace'):
+            msg_ns = f.options.csharp_namespace
+        if msg_ns is None:
+            msg_ns = '.'.join(pascal(x) for x in proto_pkg.split('.') if x)
         if not msg_ns.startswith('Easyrpc'):
             msg_ns = 'Easyrpc.' + msg_ns
         for (svc, _n, _p, _s, _i, _o) in ms:
