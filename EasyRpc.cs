@@ -80,12 +80,29 @@ namespace EasyRpc
         public HttpVersionPolicy VersionPolicy { get; set; } = HttpVersionPolicy.RequestVersionOrLower;
 
         public HttpClientTransport(string baseUrl = "", Version? version = null,
-            HttpVersionPolicy policy = HttpVersionPolicy.RequestVersionOrLower)
+            HttpVersionPolicy policy = HttpVersionPolicy.RequestVersionOrLower,
+            string? caPem = null)
         {
-            _client = new HttpClient(new SocketsHttpHandler
+            var handler = new SocketsHttpHandler
             {
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            });
+            };
+            if (!string.IsNullOrEmpty(caPem))
+            {
+                // Trust the bundled self-signed agent CA (plus the system roots).
+                var ca = System.Security.Cryptography.X509Certificates
+                    .X509Certificate2.CreateFromPem(caPem);
+                handler.SslOptions.RemoteCertificateValidationCallback = (_, cert, chain, errors) =>
+                {
+                    if (errors == System.Net.Security.SslPolicyErrors.None) return true;
+                    using var custom = new System.Security.Cryptography.X509Certificates.X509Chain();
+                    custom.ChainPolicy.TrustMode = System.Security.Cryptography.X509Certificates.X509ChainTrustMode.CustomRootTrust;
+                    custom.ChainPolicy.CustomTrustStore.Add(ca);
+                    return cert != null && custom.Build(
+                        new System.Security.Cryptography.X509Certificates.X509Certificate2(cert));
+                };
+            }
+            _client = new HttpClient(handler);
             Base = baseUrl;
             if (version != null) Version = version;
             VersionPolicy = policy;
@@ -158,72 +175,5 @@ namespace EasyRpc
                 acc.Write(remaining, 0, remaining.Length);
             }
         }
-    }
-}
-
-
-public delegate byte[] CSharpUnaryHandler(string kind, byte[] input);
-public delegate void CSharpStreamHandler(string kind, byte[] input, Action<byte[]> emit);
-
-public class CSharpServerRegistry
-{
-    public Dictionary<string, CSharpUnaryHandler> Unary = new();
-    public Dictionary<string, CSharpStreamHandler> Stream = new();
-}
-
-public class CSharpServer
-{
-    private readonly HttpListener _listener = new();
-    private readonly List<(string path, bool stream, string name)> _specs;
-    private readonly CSharpServerRegistry _reg;
-    public CSharpServer(List<(string, bool, string)> specs, CSharpServerRegistry reg) { _specs = specs; _reg = reg; }
-
-    public void Start(int port = 18888)
-    {
-        _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        _listener.Start();
-        _ = Task.Run(async () => { while (true) await Loop(); });
-    }
-    public void Stop() => _listener.Stop();
-
-    private async Task Loop()
-    {
-        var ctx = await _listener.GetContextAsync();
-        _ = Handle(ctx);
-    }
-
-    private async Task Handle(HttpListenerContext ctx)
-    {
-        try
-        {
-            var path = ctx.Request.Url!.AbsolutePath;
-            var spec = _specs.FirstOrDefault(s => s.Item1 == path);
-            if (spec.Item1 == null) { ctx.Response.StatusCode = 404; ctx.Response.Close(); return; }
-            var kind = (ctx.Request.ContentType ?? "").StartsWith("application/json") ? "json" : "proto";
-            using var ms = new MemoryStream();
-            await ctx.Request.InputStream.CopyToAsync(ms);
-            var input = ms.ToArray();
-            var ct = kind == "json" ? (spec.Item2 ? "application/connect+json" : "application/json") : (spec.Item2 ? "application/connect+proto" : "application/proto");
-            ctx.Response.ContentType = ct;
-            if (spec.Item2)
-            {
-                var h = _reg.Stream[spec.Item3];
-                var chunks = new List<byte[]>();
-                h(kind, input, b => chunks.Add(b));
-                var total = 0; foreach (var c in chunks) total += 5 + c.Length;
-                var outb = new byte[total]; var off = 0;
-                foreach (var c in chunks) { var fr = EasyRpc.Protocol.Frame(c); Array.Copy(fr, 0, outb, off, fr.Length); off += fr.Length; }
-                ctx.Response.StatusCode = 200;
-                await ctx.Response.OutputStream.WriteAsync(outb);
-            }
-            else
-            {
-                var h = _reg.Unary[spec.Item3];
-                try { var outb = h(kind, input); ctx.Response.StatusCode = 200; await ctx.Response.OutputStream.WriteAsync(outb); }
-                catch { ctx.Response.StatusCode = 500; }
-            }
-        }
-        catch { ctx.Response.StatusCode = 500; }
-        ctx.Response.Close();
     }
 }
