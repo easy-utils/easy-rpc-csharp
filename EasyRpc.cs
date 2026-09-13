@@ -128,6 +128,12 @@ namespace EasyRpc
             if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
             var ct = stream ? "application/connect+proto" : "application/proto";
             msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ct);
+            // Caller-supplied metadata (auth/tenant/token).
+            foreach (var kv in req.Headers)
+            {
+                if (kv.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)) continue;
+                msg.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+            }
             return msg;
         }
 
@@ -137,7 +143,45 @@ namespace EasyRpc
             var resp = await _client.SendAsync(msg);
             var body = await resp.Content.ReadAsByteArrayAsync();
             var s = (int)resp.StatusCode;
-            return new Response { Status = s, Body = body, Error = s >= 300 ? new RpcError(Protocol.ConnectFromStatus(s), System.Text.Encoding.UTF8.GetString(body)) : null };
+            return new Response
+            {
+                Status = s,
+                Headers = MapHeaders(resp),
+                Body = body,
+                Error = s >= 300 ? RpcErrorFrom(resp, s, body) : null,
+            };
+        }
+
+        private static Dictionary<string, List<string>> MapHeaders(HttpResponseMessage resp)
+        {
+            var outH = new Dictionary<string, List<string>>();
+            foreach (var h in resp.Headers)
+            {
+                outH[h.Key] = new List<string>(h.Value);
+            }
+            foreach (var h in resp.Content.Headers)
+            {
+                outH[h.Key] = new List<string>(h.Value);
+            }
+            return outH;
+        }
+
+        /// <summary>Reconstruct the exact RpcError from connect-code/connect-error
+        /// (the HTTP status alone is lossy).</summary>
+        private static RpcError RpcErrorFrom(HttpResponseMessage resp, int status, byte[] body)
+        {
+            if (resp.Headers.TryGetValues("connect-code", out var codes))
+            {
+                var first = System.Linq.Enumerable.FirstOrDefault(codes);
+                if (first != null && int.TryParse(first, out var c))
+                {
+                    var msg = resp.Headers.TryGetValues("connect-error", out var es)
+                        ? System.Linq.Enumerable.FirstOrDefault(es) ?? ""
+                        : "";
+                    return new RpcError(c, msg);
+                }
+            }
+            return new RpcError(Protocol.ConnectFromStatus(status), System.Text.Encoding.UTF8.GetString(body));
         }
         public async Task<IAsyncEnumerable<byte[]>> OpenStream(Request req)
         {
@@ -146,33 +190,39 @@ namespace EasyRpc
             var stream = await resp.Content.ReadAsStreamAsync();
             return DeFrame(stream);
         }
+
+        /// <summary>Decode length-prefixed Connect frames from a live stream and
+        /// yield each payload as it arrives. The 5-byte header is not guaranteed
+        /// to arrive whole, so bytes accumulate until a full frame is buffered.
+        /// </summary>
         private static async IAsyncEnumerable<byte[]> DeFrame(Stream s)
         {
-            var acc = new MemoryStream();
+            var acc = new List<byte>(8192);
+            int consumed = 0;
             var buf = new byte[8192];
             while (true)
             {
                 int n = await s.ReadAsync(buf, 0, buf.Length);
                 if (n == 0) break;
-                acc.Write(buf, 0, n);
+                for (int i = 0; i < n; i++) acc.Add(buf[i]);
                 while (true)
                 {
-                    long avail = acc.Length - acc.Position;
+                    int avail = acc.Count - consumed;
                     if (avail < 5) break;
-                    var hdr = new byte[5];
-                    acc.Read(hdr, 0, 5);
-                    int len = (hdr[1] << 24) | (hdr[2] << 16) | (hdr[3] << 8) | hdr[4];
-                    if (acc.Length - acc.Position < len) break;
+                    int len = (acc[consumed + 1] << 24) | (acc[consumed + 2] << 16) | (acc[consumed + 3] << 8) | acc[consumed + 4];
+                    if (avail - 5 < len) break;
                     var payload = new byte[len];
-                    acc.Read(payload, 0, len);
+                    for (int i = 0; i < len; i++) payload[i] = acc[consumed + 5 + i];
+                    byte flags = acc[consumed];
+                    consumed += 5 + len;
                     yield return payload;
-                    if ((hdr[0] & Protocol.EndStream) != 0) yield break;
+                    if ((flags & Protocol.EndStream) != 0) yield break;
                 }
-                acc.Position = 0;
-                // compact remaining
-                var remaining = acc.ToArray();
-                acc.SetLength(0);
-                acc.Write(remaining, 0, remaining.Length);
+                if (consumed > 0)
+                {
+                    acc.RemoveRange(0, consumed);
+                    consumed = 0;
+                }
             }
         }
     }
