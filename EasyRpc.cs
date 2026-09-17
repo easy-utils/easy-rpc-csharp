@@ -129,7 +129,9 @@ namespace EasyRpc
             catch { return data; }
         }
 
-        /// <summary>gzip-decompress (identity on failure).</summary>
+        /// <summary>gzip-decompress. THROWS RpcError(13) on corrupt input
+        /// (fault matrix M10): a flagged-but-corrupt gzip payload is a
+        /// protocol error, never silently-yielded raw compressed bytes.</summary>
         public static byte[] GzipDecompress(byte[] data)
         {
             try
@@ -140,7 +142,10 @@ namespace EasyRpc
                 gz.CopyTo(outMs);
                 return outMs.ToArray();
             }
-            catch { return data; }
+            catch (System.Exception e)
+            {
+                throw new RpcError(13, $"corrupt gzip frame: {e.Message}");
+            }
         }
 
         internal static List<object> WireDetails(IReadOnlyList<ErrorDetail>? details)
@@ -413,9 +418,9 @@ namespace EasyRpc
                 Version = Version,
                 VersionPolicy = VersionPolicy,
             };
-            if (req.Body != null) msg.Content = new ByteArrayContent(req.Body);
+            msg.Content = new ByteArrayContent(req.Body ?? Array.Empty<byte>());
             var ct = stream ? "application/connect+proto" : "application/proto";
-            msg.Content!.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ct);
+            msg.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ct);
             // Caller-supplied metadata (auth/tenant/token).
             foreach (var kv in req.Headers)
             {
@@ -496,6 +501,7 @@ namespace EasyRpc
         {
             var acc = new List<byte>(8192);
             int consumed = 0;
+            bool sawEnd = false;
             var buf = new byte[8192];
             while (true)
             {
@@ -518,6 +524,7 @@ namespace EasyRpc
                         // Connect end-stream: a non-empty payload is an error.
                         var (code, message, details) = Protocol.DecodeEndStream(payload);
                         if (code != 0) throw new RpcError(code, message, details);
+                        sawEnd = true;
                         yield break;
                     }
                     yield return payload;
@@ -528,6 +535,13 @@ namespace EasyRpc
                     consumed = 0;
                 }
             }
+            // Fault matrix F2/M8: the Connect protocol requires every
+            // server-stream to terminate with an END frame; a body that ends
+            // without one (or with trailing partial bytes) was truncated.
+            if (acc.Count > 0 && !sawEnd)
+                throw new RpcError(13, "truncated frame at end of stream");
+            if (!sawEnd)
+                throw new RpcError(13, "stream ended without END frame");
         }
     }
 }
