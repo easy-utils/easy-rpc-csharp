@@ -23,6 +23,8 @@ namespace EasyRpc
         public string Method { get; set; } = "POST";
         public Dictionary<string, List<string>> Headers { get; set; } = new();
         public byte[]? Body { get; set; }
+        /// <summary>Local cancellation channel. HttpClient adapters honour it.</summary>
+        public System.Threading.CancellationToken CancellationToken { get; set; } = default;
     }
 
     public class Response
@@ -228,8 +230,25 @@ namespace EasyRpc
     {
         private readonly int _ms;
         public TimeoutInterceptor(int ms) { _ms = ms; }
-        public Task<Response> Unary(Request req, Func<Request, Task<Response>> next) => next(Protocol.WithTimeout(req, _ms));
-        public Task<IAsyncEnumerable<byte[]>> Stream(Request req, Func<Request, Task<IAsyncEnumerable<byte[]>>> next) => next(Protocol.WithTimeout(req, _ms));
+
+        private async Task<T> Run<T>(Request req, Func<Request, Task<T>> next)
+        {
+            if (_ms <= 0) return await next(req);
+            using var cts = new System.Threading.CancellationTokenSource(_ms);
+            var r = Protocol.WithTimeout(req, _ms);
+            r.CancellationToken = cts.Token;
+            try
+            {
+                return await next(r);
+            }
+            catch (System.OperationCanceledException)
+            {
+                throw new RpcError(4, "deadline exceeded");
+            }
+        }
+
+        public Task<Response> Unary(Request req, Func<Request, Task<Response>> next) => Run(req, next);
+        public Task<IAsyncEnumerable<byte[]>> Stream(Request req, Func<Request, Task<IAsyncEnumerable<byte[]>>> next) => Run(req, next);
     }
 
     /// <summary>
@@ -310,7 +329,7 @@ namespace EasyRpc
         public async Task<Response> Send(Request req)
         {
             var msg = BuildMessage(req, false);
-            var resp = await _client.SendAsync(msg);
+            var resp = await _client.SendAsync(msg, req.CancellationToken);
             var body = await resp.Content.ReadAsByteArrayAsync();
             var s = (int)resp.StatusCode;
             var mapped = MapHeaders(resp);
@@ -361,7 +380,7 @@ namespace EasyRpc
         public async Task<IAsyncEnumerable<byte[]>> OpenStream(Request req)
         {
             var msg = BuildMessage(req, true);
-            var resp = await _client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead);
+            var resp = await _client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, req.CancellationToken);
             var stream = await resp.Content.ReadAsStreamAsync();
             return DeFrame(stream);
         }
