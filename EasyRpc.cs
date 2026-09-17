@@ -11,10 +11,28 @@ using System.Text;
 
 namespace EasyRpc
 {
+    /// <summary>A structured error detail (spec §4.1, aligned with Connect Error
+    /// Details / gRPC google.rpc status details). Type is a type URL; Value is
+    /// opaque bytes (typically an encoded protobuf message).</summary>
+    public sealed class ErrorDetail : IEquatable<ErrorDetail>
+    {
+        public string Type { get; }
+        public byte[] Value { get; }
+        public ErrorDetail(string type, byte[] value) { Type = type; Value = value; }
+        public bool Equals(ErrorDetail? other) =>
+            other is not null && other.Type == Type && other.Value.AsSpan().SequenceEqual(Value);
+        public override bool Equals(object? obj) => obj is ErrorDetail d && Equals(d);
+        public override int GetHashCode() => HashCode.Combine(Type, Value.Length);
+        public override string ToString() => $"ErrorDetail({Type}, {Value.Length}B)";
+    }
+
     public class RpcError : Exception
     {
         public int Code { get; }
-        public RpcError(int code, string message) : base($"easyrpc: code={code} {message}") { Code = code; }
+        /// <summary>Optional structured details (spec §4.1); opaque to the wire layer.</summary>
+        public IReadOnlyList<ErrorDetail>? Details { get; }
+        public RpcError(int code, string message, IReadOnlyList<ErrorDetail>? details = null)
+            : base($"easyrpc: code={code} {message}") { Code = code; Details = details; }
     }
 
     public class Request
@@ -125,59 +143,95 @@ namespace EasyRpc
             catch { return data; }
         }
 
-        /// <summary>Encode a Connect unary error body {code,message}.</summary>
-        public static byte[] EncodeErrorJson(int code, string message)
+        internal static List<object> WireDetails(IReadOnlyList<ErrorDetail>? details)
+        {
+            var outList = new List<object>();
+            if (details is null) return outList;
+            foreach (var d in details)
+                outList.Add(new Dictionary<string, object> { ["type"] = d.Type, ["value"] = Convert.ToBase64String(d.Value) });
+            return outList;
+        }
+
+        /// <summary>Parse a JSON details array; malformed entries are skipped, never
+        /// fatal (matrix M7). Returns null when absent/empty.</summary>
+        internal static List<ErrorDetail>? ParseWireDetails(System.Text.Json.JsonElement? el)
+        {
+            if (el is null || el.Value.ValueKind != System.Text.Json.JsonValueKind.Array) return null;
+            var outList = new List<ErrorDetail>();
+            foreach (var item in el.Value.EnumerateArray())
+            {
+                if (item.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                if (!item.TryGetProperty("type", out var t) || t.ValueKind != System.Text.Json.JsonValueKind.String) continue;
+                if (!item.TryGetProperty("value", out var v) || v.ValueKind != System.Text.Json.JsonValueKind.String) continue;
+                var type = t.GetString() ?? "";
+                var b64 = v.GetString() ?? "";
+                if (type.Length == 0 || b64.Length == 0) continue;
+                try { outList.Add(new ErrorDetail(type, Convert.FromBase64String(b64))); }
+                catch (System.FormatException) { /* skip invalid base64 */ }
+            }
+            return outList.Count > 0 ? outList : null;
+        }
+
+        /// <summary>Encode a Connect unary error body {code,message[,details]}.</summary>
+        public static byte[] EncodeErrorJson(int code, string message, IReadOnlyList<ErrorDetail>? details = null)
         {
             var obj = new Dictionary<string, object> { ["code"] = CodeToString(code), ["message"] = message };
+            var wire = WireDetails(details);
+            if (wire.Count > 0) obj["details"] = wire;
             return System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(obj));
         }
 
-        /// <summary>Parse a Connect unary error body; (0,"") when not one.</summary>
-        public static (int code, string message) DecodeErrorJson(byte[] body)
+        /// <summary>Parse a Connect unary error body; (0,"",null) when not one.</summary>
+        public static (int code, string message, IReadOnlyList<ErrorDetail>? details) DecodeErrorJson(byte[] body)
         {
-            if (body.Length == 0) return (0, "");
+            if (body.Length == 0) return (0, "", null);
             try
             {
                 var doc = System.Text.Json.JsonDocument.Parse(body);
                 if (!doc.RootElement.TryGetProperty("code", out var c) || c.ValueKind != System.Text.Json.JsonValueKind.String)
-                    return (0, "");
+                    return (0, "", null);
                 var msg = doc.RootElement.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String
                     ? (m.GetString() ?? "") : "";
-                return (CodeFromString(c.GetString() ?? "unknown"), msg);
+                var details = doc.RootElement.TryGetProperty("details", out var d) ? ParseWireDetails(d) : null;
+                return (CodeFromString(c.GetString() ?? "unknown"), msg, details);
             }
-            catch { return (0, ""); }
+            catch { return (0, "", null); }
         }
 
-        /// <summary>Encode a Connect end-stream payload; a clean end is empty.</summary>
-        public static byte[] EncodeEndStream(int code, string message)
+        /// <summary>Encode a Connect end-stream payload; a clean end is empty.
+        /// Details (spec §4.1) are included when non-empty.</summary>
+        public static byte[] EncodeEndStream(int code, string message, IReadOnlyList<ErrorDetail>? details = null)
         {
             if (code == 0) return Array.Empty<byte>();
-            var obj = new Dictionary<string, object>
+            var err = new Dictionary<string, object>
             {
-                ["error"] = new Dictionary<string, object>
-                {
-                    ["code"] = CodeToString(code),
-                    ["message"] = message,
-                },
+                ["code"] = CodeToString(code),
+                ["message"] = message,
             };
+            var wire = WireDetails(details);
+            if (wire.Count > 0) err["details"] = wire;
+            var obj = new Dictionary<string, object> { ["error"] = err };
             return System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(obj));
         }
 
-        /// <summary>Decode a Connect end-stream payload into (code, message).</summary>
-        public static (int code, string message) DecodeEndStream(byte[] payload)
+        /// <summary>Decode a Connect end-stream payload into (code, message, details).
+        /// Malformed input is a clean end (matrix M2); an error object without a
+        /// code maps to 2 (M3/M4); unknown fields are ignored (M5).</summary>
+        public static (int code, string message, IReadOnlyList<ErrorDetail>? details) DecodeEndStream(byte[] payload)
         {
-            if (payload.Length == 0) return (0, "");
+            if (payload.Length == 0) return (0, "", null);
             try
             {
                 var doc = System.Text.Json.JsonDocument.Parse(payload);
-                if (!doc.RootElement.TryGetProperty("error", out var e)) return (0, "");
+                if (!doc.RootElement.TryGetProperty("error", out var e)) return (0, "", null);
                 var code = e.TryGetProperty("code", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
                     ? CodeFromString(c.GetString() ?? "unknown") : 2;
                 var msg = e.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String
                     ? (m.GetString() ?? "") : "";
-                return (code, msg);
+                var details = e.TryGetProperty("details", out var d) ? ParseWireDetails(d) : null;
+                return (code, msg, details);
             }
-            catch { return (0, ""); }
+            catch { return (0, "", null); }
         }
     }
 
@@ -384,8 +438,8 @@ namespace EasyRpc
                 err = RpcErrorFrom(resp, s, body);
                 if (err == null)
                 {
-                    var (jc, jm) = Protocol.DecodeErrorJson(body);
-                    err = jc != 0 ? new RpcError(jc, jm) : new RpcError(Protocol.ConnectFromStatus(s), System.Text.Encoding.UTF8.GetString(body));
+                    var (jc, jm, jd) = Protocol.DecodeErrorJson(body);
+                    err = jc != 0 ? new RpcError(jc, jm, jd) : new RpcError(Protocol.ConnectFromStatus(s), System.Text.Encoding.UTF8.GetString(body));
                 }
             }
             return new Response { Status = s, Headers = mapped, Body = body, Error = err };
@@ -405,9 +459,10 @@ namespace EasyRpc
             return outH;
         }
 
-        /// <summary>Reconstruct the exact RpcError from connect-code/connect-error
-        /// (the HTTP status alone is lossy).</summary>
-        private static RpcError RpcErrorFrom(HttpResponseMessage resp, int status, byte[] body)
+        /// <summary>Reconstruct the exact RpcError from the connect-code header
+        /// (the HTTP status alone is lossy). Returns null when the header is
+        /// absent so the caller falls through to the Connect JSON body path.</summary>
+        private static RpcError? RpcErrorFrom(HttpResponseMessage resp, int status, byte[] body)
         {
             if (resp.Headers.TryGetValues("connect-code", out var codes))
             {
@@ -417,10 +472,13 @@ namespace EasyRpc
                     var msg = resp.Headers.TryGetValues("connect-error", out var es)
                         ? System.Linq.Enumerable.FirstOrDefault(es) ?? ""
                         : "";
-                    return new RpcError(c, msg);
+                    // The header carries the exact code; the JSON body (when
+                    // present) may still carry details - merge them.
+                    var (_, _, hd) = Protocol.DecodeErrorJson(body);
+                    return new RpcError(c, msg, hd);
                 }
             }
-            return new RpcError(Protocol.ConnectFromStatus(status), System.Text.Encoding.UTF8.GetString(body));
+            return null;
         }
         public async Task<IAsyncEnumerable<byte[]>> OpenStream(Request req)
         {
@@ -458,8 +516,8 @@ namespace EasyRpc
                     if ((flags & Protocol.EndStream) != 0)
                     {
                         // Connect end-stream: a non-empty payload is an error.
-                        var (code, message) = Protocol.DecodeEndStream(payload);
-                        if (code != 0) throw new RpcError(code, message);
+                        var (code, message, details) = Protocol.DecodeEndStream(payload);
+                        if (code != 0) throw new RpcError(code, message, details);
                         yield break;
                     }
                     yield return payload;

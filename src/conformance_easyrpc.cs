@@ -34,5 +34,33 @@ namespace EasyRpc {
       return FailResponse.Parser.ParseFrom(res.Body);
     }
 
+    public async IAsyncEnumerable<StreamFailResponse> streamFail(StreamFailRequest req) {
+      var stream = await _t.OpenStream(new Request { Url = "/v1/stream-fail", Body = req.ToByteArray() });
+      await foreach (var m in stream) { yield return StreamFailResponse.Parser.ParseFrom(m); }
+    }
+
+    public async Task<EchoMetaResponse> echoMeta(EchoMetaRequest req) {
+      var res = await _t.Send(new Request { Url = "/v1/echo-meta", Body = req.ToByteArray() });
+      if (res.Error != null) throw res.Error;
+      return EchoMetaResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async Task<BigResponse> big(BigRequest req) {
+      var res = await _t.Send(new Request { Url = "/v1/big", Body = req.ToByteArray() });
+      if (res.Error != null) throw res.Error;
+      return BigResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async Task<FailDetailsResponse> failDetails(FailDetailsRequest req) {
+      var res = await _t.Send(new Request { Url = "/v1/fail-details", Body = req.ToByteArray() });
+      if (res.Error != null) throw res.Error;
+      return FailDetailsResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async IAsyncEnumerable<StreamFailDetailsResponse> streamFailDetails(StreamFailDetailsRequest req) {
+      var stream = await _t.OpenStream(new Request { Url = "/v1/stream-fail-details", Body = req.ToByteArray() });
+      await foreach (var m in stream) { yield return StreamFailDetailsResponse.Parser.ParseFrom(m); }
+    }
+
   }
 }
