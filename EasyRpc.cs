@@ -57,6 +57,9 @@ namespace EasyRpc
 
         public const string HeaderTimeout = "connect-timeout-ms";
         public const string HeaderProtocolVersion = "connect-protocol-version";
+        public const string HeaderAcceptEncoding = "connect-accept-encoding";
+        public const string EncodingGzip = "gzip";
+        public const int CompressMinBytes = 1024;
         public const string ConnectProtocolVersion = "1";
         public const int DefaultMaxMessageBytes = 4 * 1024 * 1024;
 
@@ -91,6 +94,33 @@ namespace EasyRpc
         {
             foreach (var kv in CodeNames) if (kv.Value == name) return kv.Key;
             return 2;
+        }
+
+        /// <summary>gzip-compress (identity on failure).</summary>
+        public static byte[] GzipCompress(byte[] data)
+        {
+            try
+            {
+                using var ms = new System.IO.MemoryStream();
+                using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Compress, true))
+                    gz.Write(data, 0, data.Length);
+                return ms.ToArray();
+            }
+            catch { return data; }
+        }
+
+        /// <summary>gzip-decompress (identity on failure).</summary>
+        public static byte[] GzipDecompress(byte[] data)
+        {
+            try
+            {
+                using var input = new System.IO.MemoryStream(data);
+                using var gz = new System.IO.Compression.GZipStream(input, System.IO.Compression.CompressionMode.Decompress);
+                using var outMs = new System.IO.MemoryStream();
+                gz.CopyTo(outMs);
+                return outMs.ToArray();
+            }
+            catch { return data; }
         }
 
         /// <summary>Encode a Connect unary error body {code,message}.</summary>
@@ -360,6 +390,7 @@ namespace EasyRpc
                     for (int i = 0; i < len; i++) payload[i] = acc[consumed + 5 + i];
                     byte flags = acc[consumed];
                     consumed += 5 + len;
+                    if ((flags & 0x01) != 0) payload = Protocol.GzipDecompress(payload);
                     if ((flags & Protocol.EndStream) != 0)
                     {
                         // Connect end-stream: a non-empty payload is an error.
