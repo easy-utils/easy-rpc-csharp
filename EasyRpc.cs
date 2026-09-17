@@ -251,6 +251,48 @@ namespace EasyRpc
         public Task<IAsyncEnumerable<byte[]>> Stream(Request req, Func<Request, Task<IAsyncEnumerable<byte[]>>> next) => Run(req, next);
     }
 
+    /// <summary>Adapter modes for the composition root.</summary>
+    public enum TransportMode { Auto, H1, H2, H3 }
+
+    /// <summary>Options for the composition root.</summary>
+    public class ConnectOptions
+    {
+        public string BaseUrl { get; set; } = "";
+        public string Token { get; set; } = "";
+        public TransportMode Mode { get; set; } = TransportMode.Auto;
+        public int TimeoutMs { get; set; } = 0;
+        public List<Interceptor> Interceptors { get; set; } = new();
+    }
+
+    /// <summary>Composition root: pick an adapter by Mode, install the built-in
+    /// metadata/deadline interceptors, then any user interceptors. Swapping Mode
+    /// leaves the interceptors unchanged.</summary>
+    public static class EasyRpcClient
+    {
+        public static Transport Connect(ConnectOptions opts)
+        {
+            var version = opts.Mode switch
+            {
+                TransportMode.H1 => new Version(1, 1),
+                TransportMode.H3 => new Version(3, 0),
+                _ => new Version(2, 0),
+            };
+            var policy = opts.Mode == TransportMode.H3
+                ? HttpVersionPolicy.RequestVersionOrHigher
+                : HttpVersionPolicy.RequestVersionOrLower;
+            Transport inner = new HttpClientTransport(opts.BaseUrl, version, policy);
+            var ics = new List<Interceptor>();
+            if (opts.Token.Length > 0)
+                ics.Add(new MetadataInterceptor(new Dictionary<string, List<string>>
+                {
+                    ["Authorization"] = new List<string> { $"Bearer {opts.Token}" },
+                }));
+            if (opts.TimeoutMs > 0) ics.Add(new TimeoutInterceptor(opts.TimeoutMs));
+            ics.AddRange(opts.Interceptors);
+            return ics.Count == 0 ? inner : new InterceptorTransport(ics, inner);
+        }
+    }
+
     /// <summary>
     /// Cross-platform HTTP client transport backed by System.Net.Http.HttpClient +
     /// SocketsHttpHandler. On .NET MAUI/Android/iOS the platform handler is used
