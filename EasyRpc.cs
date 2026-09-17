@@ -54,6 +54,56 @@ namespace EasyRpc
             outB.AddRange(payload);
             return outB.ToArray();
         }
+
+        private static readonly Dictionary<int, string> CodeNames = new()
+        {
+            [0] = "ok", [1] = "canceled", [2] = "unknown", [3] = "invalid_argument",
+            [4] = "deadline_exceeded", [5] = "not_found", [6] = "already_exists",
+            [7] = "permission_denied", [8] = "resource_exhausted", [9] = "failed_precondition",
+            [10] = "aborted", [11] = "out_of_range", [12] = "unimplemented", [13] = "internal",
+            [14] = "unavailable", [15] = "data_loss", [16] = "unauthenticated",
+        };
+
+        public static string CodeToString(int code) =>
+            CodeNames.TryGetValue(code, out var s) ? s : "unknown";
+
+        public static int CodeFromString(string name)
+        {
+            foreach (var kv in CodeNames) if (kv.Value == name) return kv.Key;
+            return 2;
+        }
+
+        /// <summary>Encode a Connect end-stream payload; a clean end is empty.</summary>
+        public static byte[] EncodeEndStream(int code, string message)
+        {
+            if (code == 0) return Array.Empty<byte>();
+            var obj = new Dictionary<string, object>
+            {
+                ["error"] = new Dictionary<string, object>
+                {
+                    ["code"] = CodeToString(code),
+                    ["message"] = message,
+                },
+            };
+            return System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(obj));
+        }
+
+        /// <summary>Decode a Connect end-stream payload into (code, message).</summary>
+        public static (int code, string message) DecodeEndStream(byte[] payload)
+        {
+            if (payload.Length == 0) return (0, "");
+            try
+            {
+                var doc = System.Text.Json.JsonDocument.Parse(payload);
+                if (!doc.RootElement.TryGetProperty("error", out var e)) return (0, "");
+                var code = e.TryGetProperty("code", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? CodeFromString(c.GetString() ?? "unknown") : 2;
+                var msg = e.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? (m.GetString() ?? "") : "";
+                return (code, msg);
+            }
+            catch { return (0, ""); }
+        }
     }
 
     public interface Transport
@@ -215,8 +265,14 @@ namespace EasyRpc
                     for (int i = 0; i < len; i++) payload[i] = acc[consumed + 5 + i];
                     byte flags = acc[consumed];
                     consumed += 5 + len;
+                    if ((flags & Protocol.EndStream) != 0)
+                    {
+                        // Connect end-stream: a non-empty payload is an error.
+                        var (code, message) = Protocol.DecodeEndStream(payload);
+                        if (code != 0) throw new RpcError(code, message);
+                        yield break;
+                    }
                     yield return payload;
-                    if ((flags & Protocol.EndStream) != 0) yield break;
                 }
                 if (consumed > 0)
                 {
