@@ -262,6 +262,9 @@ namespace EasyRpc
         public TransportMode Mode { get; set; } = TransportMode.Auto;
         public int TimeoutMs { get; set; } = 0;
         public List<Interceptor> Interceptors { get; set; } = new();
+        /// <summary>Optional pre-built adapter (e.g. one configured with a
+        /// custom CA / HttpClient). When set, Mode is ignored.</summary>
+        public Transport? Adapter { get; set; }
     }
 
     /// <summary>Composition root: pick an adapter by Mode, install the built-in
@@ -280,7 +283,7 @@ namespace EasyRpc
             var policy = opts.Mode == TransportMode.H3
                 ? HttpVersionPolicy.RequestVersionOrHigher
                 : HttpVersionPolicy.RequestVersionOrLower;
-            Transport inner = new HttpClientTransport(opts.BaseUrl, version, policy);
+            Transport inner = opts.Adapter ?? new HttpClientTransport(opts.BaseUrl, version, policy);
             var ics = new List<Interceptor>();
             if (opts.Token.Length > 0)
                 ics.Add(new MetadataInterceptor(new Dictionary<string, List<string>>
