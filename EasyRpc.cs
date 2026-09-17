@@ -129,6 +129,53 @@ namespace EasyRpc
         Task<IAsyncEnumerable<byte[]>> OpenStream(Request req);
     }
 
+    /// <summary>A call interceptor: mutate the request (auth/metadata), impose
+    /// a deadline, observe, or short-circuit. `next` performs the call.</summary>
+    public interface Interceptor
+    {
+        Task<Response> Unary(Request req, Func<Request, Task<Response>> next);
+        Task<IAsyncEnumerable<byte[]>> Stream(Request req, Func<Request, Task<IAsyncEnumerable<byte[]>>> next);
+    }
+
+    /// <summary>Apply interceptors (first = outermost) around a Transport.</summary>
+    public class InterceptorTransport : Transport
+    {
+        private readonly IReadOnlyList<Interceptor> _ics;
+        private readonly Transport _inner;
+        public InterceptorTransport(IReadOnlyList<Interceptor> ics, Transport inner) { _ics = ics; _inner = inner; }
+
+        public Task<Response> Send(Request req) => Dispatch(0, req);
+        private Task<Response> Dispatch(int i, Request r) =>
+            i >= _ics.Count ? _inner.Send(r) : _ics[i].Unary(r, nr => Dispatch(i + 1, nr));
+
+        public Task<IAsyncEnumerable<byte[]>> OpenStream(Request req) => DispatchS(0, req);
+        private Task<IAsyncEnumerable<byte[]>> DispatchS(int i, Request r) =>
+            i >= _ics.Count ? _inner.OpenStream(r) : _ics[i].Stream(r, nr => DispatchS(i + 1, nr));
+    }
+
+    /// <summary>Attach fixed metadata to every call.</summary>
+    public class MetadataInterceptor : Interceptor
+    {
+        private readonly Dictionary<string, List<string>> _md;
+        public MetadataInterceptor(Dictionary<string, List<string>> md) { _md = md; }
+        private Request Aug(Request req)
+        {
+            foreach (var kv in _md) if (!req.Headers.ContainsKey(kv.Key)) req.Headers[kv.Key] = kv.Value;
+            return req;
+        }
+        public Task<Response> Unary(Request req, Func<Request, Task<Response>> next) => next(Aug(req));
+        public Task<IAsyncEnumerable<byte[]>> Stream(Request req, Func<Request, Task<IAsyncEnumerable<byte[]>>> next) => next(Aug(req));
+    }
+
+    /// <summary>Attach a Connect deadline to every call.</summary>
+    public class TimeoutInterceptor : Interceptor
+    {
+        private readonly int _ms;
+        public TimeoutInterceptor(int ms) { _ms = ms; }
+        public Task<Response> Unary(Request req, Func<Request, Task<Response>> next) => next(Protocol.WithTimeout(req, _ms));
+        public Task<IAsyncEnumerable<byte[]>> Stream(Request req, Func<Request, Task<IAsyncEnumerable<byte[]>>> next) => next(Protocol.WithTimeout(req, _ms));
+    }
+
     /// <summary>
     /// Cross-platform HTTP client transport backed by System.Net.Http.HttpClient +
     /// SocketsHttpHandler. On .NET MAUI/Android/iOS the platform handler is used
