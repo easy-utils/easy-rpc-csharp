@@ -56,6 +56,9 @@ namespace EasyRpc
         }
 
         public const string HeaderTimeout = "connect-timeout-ms";
+        public const string HeaderProtocolVersion = "connect-protocol-version";
+        public const string ConnectProtocolVersion = "1";
+        public const int DefaultMaxMessageBytes = 4 * 1024 * 1024;
 
         /// <summary>Parse the Connect timeout header into milliseconds (0 = none).</summary>
         public static int ParseTimeout(string? value)
