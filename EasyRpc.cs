@@ -90,6 +90,29 @@ namespace EasyRpc
             return 2;
         }
 
+        /// <summary>Encode a Connect unary error body {code,message}.</summary>
+        public static byte[] EncodeErrorJson(int code, string message)
+        {
+            var obj = new Dictionary<string, object> { ["code"] = CodeToString(code), ["message"] = message };
+            return System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(obj));
+        }
+
+        /// <summary>Parse a Connect unary error body; (0,"") when not one.</summary>
+        public static (int code, string message) DecodeErrorJson(byte[] body)
+        {
+            if (body.Length == 0) return (0, "");
+            try
+            {
+                var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (!doc.RootElement.TryGetProperty("code", out var c) || c.ValueKind != System.Text.Json.JsonValueKind.String)
+                    return (0, "");
+                var msg = doc.RootElement.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? (m.GetString() ?? "") : "";
+                return (CodeFromString(c.GetString() ?? "unknown"), msg);
+            }
+            catch { return (0, ""); }
+        }
+
         /// <summary>Encode a Connect end-stream payload; a clean end is empty.</summary>
         public static byte[] EncodeEndStream(int code, string message)
         {
@@ -257,13 +280,18 @@ namespace EasyRpc
             var resp = await _client.SendAsync(msg);
             var body = await resp.Content.ReadAsByteArrayAsync();
             var s = (int)resp.StatusCode;
-            return new Response
+            var mapped = MapHeaders(resp);
+            RpcError? err = null;
+            if (s >= 300)
             {
-                Status = s,
-                Headers = MapHeaders(resp),
-                Body = body,
-                Error = s >= 300 ? RpcErrorFrom(resp, s, body) : null,
-            };
+                err = RpcErrorFrom(resp, s, body);
+                if (err == null)
+                {
+                    var (jc, jm) = Protocol.DecodeErrorJson(body);
+                    err = jc != 0 ? new RpcError(jc, jm) : new RpcError(Protocol.ConnectFromStatus(s), System.Text.Encoding.UTF8.GetString(body));
+                }
+            }
+            return new Response { Status = s, Headers = mapped, Body = body, Error = err };
         }
 
         private static Dictionary<string, List<string>> MapHeaders(HttpResponseMessage resp)
