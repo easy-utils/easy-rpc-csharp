@@ -6,7 +6,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>EasyRpc</RootNamespace>
     <PackageId>EasyRpc</PackageId>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Authors>EasyLab</Authors>
     <Description>easy-rpc .NET client/server core (Connect wire, true server-streaming).</Description>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
