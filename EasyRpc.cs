@@ -55,6 +55,23 @@ namespace EasyRpc
             return outB.ToArray();
         }
 
+        public const string HeaderTimeout = "connect-timeout-ms";
+
+        /// <summary>Parse the Connect timeout header into milliseconds (0 = none).</summary>
+        public static int ParseTimeout(string? value)
+        {
+            if (string.IsNullOrEmpty(value)) return 0;
+            return int.TryParse(value, out var n) && n > 0 ? n : 0;
+        }
+
+        /// <summary>Attach a deadline to a request.</summary>
+        public static Request WithTimeout(Request req, int timeoutMs)
+        {
+            if (timeoutMs <= 0) return req;
+            req.Headers[HeaderTimeout] = new List<string> { timeoutMs.ToString() };
+            return req;
+        }
+
         private static readonly Dictionary<int, string> CodeNames = new()
         {
             [0] = "ok", [1] = "canceled", [2] = "unknown", [3] = "invalid_argument",
