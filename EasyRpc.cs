@@ -38,7 +38,6 @@ namespace EasyRpc
     public class Request
     {
         public string Url { get; set; } = "";
-        public string Method { get; set; } = "POST";
         public Dictionary<string, List<string>> Headers { get; set; } = new();
         public byte[]? Body { get; set; }
         /// <summary>Local cancellation channel. HttpClient adapters honour it.</summary>
@@ -50,6 +49,8 @@ namespace EasyRpc
         public int Status { get; set; }
         public Dictionary<string, List<string>> Headers { get; set; } = new();
         public byte[] Body { get; set; } = System.Array.Empty<byte>();
+        /// <summary>Unary trailing metadata (demuxed from trailer-* headers).</summary>
+        public Dictionary<string, List<string>> Trailers { get; set; } = new();
         public RpcError? Error { get; set; }
     }
 
@@ -205,38 +206,79 @@ namespace EasyRpc
 
         /// <summary>Encode a Connect end-stream payload; a clean end is empty.
         /// Details (spec §4.1) are included when non-empty.</summary>
-        public static byte[] EncodeEndStream(int code, string message, IReadOnlyList<ErrorDetail>? details = null)
+        public static byte[] EncodeEndStream(int code, string message, IReadOnlyList<ErrorDetail>? details = null,
+            Dictionary<string, List<string>>? metadata = null)
         {
-            if (code == 0) return Array.Empty<byte>();
-            var err = new Dictionary<string, object>
+            var obj = new Dictionary<string, object>();
+            if (code != 0)
             {
-                ["code"] = CodeToString(code),
-                ["message"] = message,
-            };
-            var wire = WireDetails(details);
-            if (wire.Count > 0) err["details"] = wire;
-            var obj = new Dictionary<string, object> { ["error"] = err };
+                var err = new Dictionary<string, object>
+                {
+                    ["code"] = CodeToString(code),
+                    ["message"] = message,
+                };
+                var wire = WireDetails(details);
+                if (wire.Count > 0) err["details"] = wire;
+                obj["error"] = err;
+            }
+            if (metadata != null)
+            {
+                var md = new Dictionary<string, List<string>>();
+                foreach (var kv in metadata) if (kv.Value.Count > 0) md[kv.Key] = kv.Value;
+                if (md.Count > 0) obj["metadata"] = md;
+            }
             return System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(obj));
         }
 
         /// <summary>Decode a Connect end-stream payload into (code, message, details).
         /// Malformed input is a clean end (matrix M2); an error object without a
         /// code maps to 2 (M3/M4); unknown fields are ignored (M5).</summary>
-        public static (int code, string message, IReadOnlyList<ErrorDetail>? details) DecodeEndStream(byte[] payload)
+        public sealed record EndStreamInfo(int Code, string Message, IReadOnlyList<ErrorDetail>? Details,
+            Dictionary<string, List<string>> Metadata);
+
+        public static EndStreamInfo DecodeEndStream(byte[] payload)
         {
-            if (payload.Length == 0) return (0, "", null);
+            var empty = new EndStreamInfo(0, "", null, new Dictionary<string, List<string>>());
+            if (payload.Length == 0) return empty;
             try
             {
                 var doc = System.Text.Json.JsonDocument.Parse(payload);
-                if (!doc.RootElement.TryGetProperty("error", out var e)) return (0, "", null);
+                var metadata = new Dictionary<string, List<string>>();
+                if (doc.RootElement.TryGetProperty("metadata", out var md) && md.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    foreach (var prop in md.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.Array) continue;
+                        var vs = new List<string>();
+                        foreach (var el in prop.Value.EnumerateArray())
+                            if (el.ValueKind == System.Text.Json.JsonValueKind.String) vs.Add(el.GetString() ?? "");
+                        if (vs.Count > 0) metadata[prop.Name] = vs;
+                    }
+                }
+                if (!doc.RootElement.TryGetProperty("error", out var e)) return empty with { Metadata = metadata };
                 var code = e.TryGetProperty("code", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
                     ? CodeFromString(c.GetString() ?? "unknown") : 2;
                 var msg = e.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String
                     ? (m.GetString() ?? "") : "";
                 var details = e.TryGetProperty("details", out var d) ? ParseWireDetails(d) : null;
-                return (code, msg, details);
+                return new EndStreamInfo(code, msg, details, metadata);
             }
-            catch { return (0, "", null); }
+            catch { return empty; }
+        }
+
+        /// <summary>Split headers into (headers, trailers) by the trailer- prefix.</summary>
+        public static (Dictionary<string, List<string>> headers, Dictionary<string, List<string>> trailers) DemuxTrailers(
+            Dictionary<string, List<string>> all)
+        {
+            var h = new Dictionary<string, List<string>>();
+            var t = new Dictionary<string, List<string>>();
+            foreach (var kv in all)
+            {
+                if (kv.Key.StartsWith("trailer-", System.StringComparison.OrdinalIgnoreCase))
+                    t[kv.Key.Substring(8).ToLowerInvariant()] = kv.Value;
+                else h[kv.Key] = kv.Value;
+            }
+            return (h, t);
         }
     }
 
@@ -413,7 +455,7 @@ namespace EasyRpc
 
         private HttpRequestMessage BuildMessage(Request req, bool stream)
         {
-            var msg = new HttpRequestMessage(new HttpMethod(req.Method), _url(req.Url))
+            var msg = new HttpRequestMessage(HttpMethod.Post, _url(req.Url))
             {
                 Version = Version,
                 VersionPolicy = VersionPolicy,
@@ -443,7 +485,12 @@ namespace EasyRpc
             var resp = await _client.SendAsync(msg, req.CancellationToken);
             var body = await resp.Content.ReadAsByteArrayAsync();
             var s = (int)resp.StatusCode;
-            var mapped = MapHeaders(resp);
+            var all = MapHeaders(resp);
+            if (all.TryGetValue("content-encoding", out var ce) && ce.Count > 0 && ce[0] == "gzip" && body.Length > 0)
+            {
+                body = Protocol.GzipDecompress(body);
+            }
+            var (mapped, trailers) = Protocol.DemuxTrailers(all);
             RpcError? err = null;
             if (s >= 300)
             {
@@ -454,7 +501,7 @@ namespace EasyRpc
                     err = jc != 0 ? new RpcError(jc, jm, jd) : new RpcError(Protocol.ConnectFromStatus(s), System.Text.Encoding.UTF8.GetString(body));
                 }
             }
-            return new Response { Status = s, Headers = mapped, Body = body, Error = err };
+            return new Response { Status = s, Headers = mapped, Body = body, Trailers = trailers, Error = err };
         }
 
         private static Dictionary<string, List<string>> MapHeaders(HttpResponseMessage resp)
@@ -528,9 +575,9 @@ namespace EasyRpc
                     if ((flags & 0x01) != 0) payload = Protocol.GzipDecompress(payload);
                     if ((flags & Protocol.EndStream) != 0)
                     {
-                        // Connect end-stream: a non-empty payload is an error.
-                        var (code, message, details) = Protocol.DecodeEndStream(payload);
-                        if (code != 0) throw new RpcError(code, message, details);
+                        // Connect end-stream: an error and/or trailing metadata.
+                        var es = Protocol.DecodeEndStream(payload);
+                        if (es.Code != 0) throw new RpcError(es.Code, es.Message, es.Details);
                         sawEnd = true;
                         yield break;
                     }

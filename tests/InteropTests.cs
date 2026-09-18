@@ -61,4 +61,20 @@ public class InteropTests
         Assert.Equal("t/stream", ex.Details!.Single().Type);
         Assert.Equal("sd", System.Text.Encoding.UTF8.GetString(ex.Details.Single().Value));
     }
+
+    [Fact]
+    public async Task UnaryTrailerSurfaces()
+    {
+        var c = Client();
+        var outM = await c.echoTrailer(new EchoTrailerRequest { Input = "x" });
+        Assert.Equal("trailer:x", outM.Output);
+        Assert.Equal(new[] { "unary-x" }, c.LastTrailers["x-trl"]);
+    }
+
+    [Fact]
+    public async Task UnaryErrorSurfaces()
+    {
+        var ex = await Assert.ThrowsAsync<RpcError>(() => Client().fail(new FailRequest { Message = "nope" }));
+        Assert.Equal(3, ex.Code);
+    }
 }

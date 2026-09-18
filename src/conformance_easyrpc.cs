@@ -8,58 +8,77 @@ using Google.Protobuf;
 
 namespace EasyRpc {
   public class ConformanceServiceClient {
+    public Dictionary<string, List<string>> LastTrailers { get; private set; } = new();
     private readonly Transport _t;
     public ConformanceServiceClient(Transport t) { _t = t; }
 
     public async Task<HealthResponse> health(HealthRequest req) {
-      var res = await _t.Send(new Request { Url = "/v1/health", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Health", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
       return HealthResponse.Parser.ParseFrom(res.Body);
     }
 
     public async Task<EchoResponse> echo(EchoRequest req) {
-      var res = await _t.Send(new Request { Url = "/v1/echo", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Echo", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
       return EchoResponse.Parser.ParseFrom(res.Body);
     }
 
     public async IAsyncEnumerable<CountResponse> count(CountRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/v1/count", Body = req.ToByteArray() });
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Count", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
       await foreach (var m in stream) { yield return CountResponse.Parser.ParseFrom(m); }
     }
 
     public async Task<FailResponse> fail(FailRequest req) {
-      var res = await _t.Send(new Request { Url = "/v1/fail", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Fail", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
       return FailResponse.Parser.ParseFrom(res.Body);
     }
 
     public async IAsyncEnumerable<StreamFailResponse> streamFail(StreamFailRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/v1/stream-fail", Body = req.ToByteArray() });
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/StreamFail", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
       await foreach (var m in stream) { yield return StreamFailResponse.Parser.ParseFrom(m); }
     }
 
     public async Task<EchoMetaResponse> echoMeta(EchoMetaRequest req) {
-      var res = await _t.Send(new Request { Url = "/v1/echo-meta", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoMeta", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
       return EchoMetaResponse.Parser.ParseFrom(res.Body);
     }
 
     public async Task<BigResponse> big(BigRequest req) {
-      var res = await _t.Send(new Request { Url = "/v1/big", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Big", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
       return BigResponse.Parser.ParseFrom(res.Body);
     }
 
     public async Task<FailDetailsResponse> failDetails(FailDetailsRequest req) {
-      var res = await _t.Send(new Request { Url = "/v1/fail-details", Body = req.ToByteArray() });
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/FailDetails", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
       return FailDetailsResponse.Parser.ParseFrom(res.Body);
     }
 
     public async IAsyncEnumerable<StreamFailDetailsResponse> streamFailDetails(StreamFailDetailsRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/v1/stream-fail-details", Body = req.ToByteArray() });
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/StreamFailDetails", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
       await foreach (var m in stream) { yield return StreamFailDetailsResponse.Parser.ParseFrom(m); }
+    }
+
+    public async Task<EchoTrailerResponse> echoTrailer(EchoTrailerRequest req) {
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoTrailer", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
+      if (res.Error != null) throw res.Error;
+      return EchoTrailerResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async IAsyncEnumerable<CountTrailerResponse> countTrailer(CountTrailerRequest req) {
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/CountTrailer", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
+      await foreach (var m in stream) { yield return CountTrailerResponse.Parser.ParseFrom(m); }
     }
 
   }

@@ -15,40 +15,11 @@ def resolve(f):
     for svc in f.service:
         for m in svc.method:
             name = m.name or ''
-            path = rest_path(m) or '/%s.%s/%s' % (pkg, svc.name, name)
+            path = '/%s.%s/%s' % (pkg, svc.name, name)
             out.append((svc.name, name, path, m.server_streaming,
                         m.input_type.split('.')[-1], m.output_type.split('.')[-1]))
     return out
 
-
-def rest_path(m):
-    opts = m.options
-    if not opts:
-        return None
-    try:
-        raw = opts.SerializeToString()
-        pos = 0
-        while pos < len(raw):
-            tag, pos = readvar(raw, pos)
-            field = tag >> 3
-            wt = tag & 7
-            if wt == 2:
-                ln, pos = readvar(raw, pos)
-                val = raw[pos:pos + ln]
-                pos += ln
-                if field == 72295728:
-                    p = parse_rule(val)
-                    if p:
-                        return p
-            elif wt == 0:
-                _, pos = readvar(raw, pos)
-            elif wt == 5:
-                pos += 4
-            elif wt == 1:
-                pos += 8
-    except Exception:
-        return None
-    return None
 
 
 def readvar(b, i):
@@ -130,18 +101,20 @@ def main():
             L.append('')
             L.append(f'namespace {ns} {{')
             L.append(f'  public class {client} {{')
+            L.append('    public Dictionary<string, List<string>> LastTrailers { get; private set; } = new();')
             L.append('    private readonly Transport _t;')
             L.append(f'    public {client}(Transport t) {{ _t = t; }}')
             L.append('')
             for (svc, name, path, ss, it, ot) in methods:
                 if ss:
                     L.append('    public async IAsyncEnumerable<%s> %s(%s req) {' % (ot, camel(name), it))
-                    L.append('      var stream = await _t.OpenStream(new Request { Url = "%s", Body = req.ToByteArray() });' % path)
+                    L.append('      var stream = await _t.OpenStream(new Request { Url = "%s", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });' % path)
                     L.append('      await foreach (var m in stream) { yield return %s.Parser.ParseFrom(m); }' % ot)
                     L.append('    }')
                 else:
                     L.append('    public async Task<%s> %s(%s req) {' % (ot, camel(name), it))
                     L.append('      var res = await _t.Send(new Request { Url = "%s", Body = req.ToByteArray() });' % path)
+                    L.append('      LastTrailers = res.Trailers;')
                     L.append('      if (res.Error != null) throw res.Error;')
                     L.append('      return %s.Parser.ParseFrom(res.Body);' % ot)
                     L.append('    }')

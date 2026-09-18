@@ -65,7 +65,7 @@ public class FaultInjectionTests : IDisposable
         var outB = new List<byte>();
         try
         {
-            var st = await t.OpenStream(new Request { Url = "/x", Method = "POST" });
+            var st = await t.OpenStream(new Request { Url = "/x" });
             await foreach (var p in st) outB.Add(p[0]);
         }
         finally
