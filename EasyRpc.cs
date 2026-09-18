@@ -149,12 +149,32 @@ namespace EasyRpc
             }
         }
 
+        internal static string B64Encode(byte[] data)
+        {
+            // UNPADDED standard base64 — matches Connect (base64.RawStdEncoding).
+            return Convert.ToBase64String(data).TrimEnd('=');
+        }
+
+        internal static byte[] B64Decode(string s)
+        {
+            // Accept standard OR URL-safe base64, padded OR unpadded.
+            var t = s.TrimEnd('=').Replace('-', '+').Replace('_', '/');
+            switch (t.Length % 4)
+            {
+                case 0: break;
+                case 2: t += "=="; break;
+                case 3: t += "="; break;
+                default: throw new FormatException("invalid base64 length");
+            }
+            return Convert.FromBase64String(t);
+        }
+
         internal static List<object> WireDetails(IReadOnlyList<ErrorDetail>? details)
         {
             var outList = new List<object>();
             if (details is null) return outList;
             foreach (var d in details)
-                outList.Add(new Dictionary<string, object> { ["type"] = d.Type, ["value"] = Convert.ToBase64String(d.Value) });
+                outList.Add(new Dictionary<string, object> { ["type"] = d.Type, ["value"] = B64Encode(d.Value) });
             return outList;
         }
 
@@ -172,7 +192,7 @@ namespace EasyRpc
                 var type = t.GetString() ?? "";
                 var b64 = v.GetString() ?? "";
                 if (type.Length == 0 || b64.Length == 0) continue;
-                try { outList.Add(new ErrorDetail(type, Convert.FromBase64String(b64))); }
+                try { outList.Add(new ErrorDetail(type, B64Decode(b64))); }
                 catch (System.FormatException) { /* skip invalid base64 */ }
             }
             return outList.Count > 0 ? outList : null;
