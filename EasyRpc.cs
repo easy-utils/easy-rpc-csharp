@@ -280,6 +280,16 @@ namespace EasyRpc
             }
             return (h, t);
         }
+
+        /// <summary>Merge trailers into headers using the trailer- prefix.</summary>
+        public static Dictionary<string, List<string>> MuxTrailers(
+            Dictionary<string, List<string>> headers, Dictionary<string, List<string>> trailers)
+        {
+            var outH = new Dictionary<string, List<string>>(headers);
+            foreach (var kv in trailers)
+                outH["trailer-" + kv.Key.ToLowerInvariant()] = kv.Value;
+            return outH;
+        }
     }
 
     public interface Transport

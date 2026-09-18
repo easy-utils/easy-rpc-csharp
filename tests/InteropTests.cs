@@ -9,7 +9,17 @@ public class InteropTests
 {
     private static string BaseUrl => System.Environment.GetEnvironmentVariable("EASY_RPC_BASE") ?? "http://127.0.0.1:18888";
 
-    private static ConformanceServiceClient Client() => new(new HttpClientTransport(baseUrl: BaseUrl));
+    private static ConformanceServiceClient Client()
+    {
+        // Unified transport vocabulary (spec §7.1): h1 | h2 | h3 (default h1).
+        var t = (System.Environment.GetEnvironmentVariable("EASY_RPC_TRANSPORT") ?? "h1").ToLowerInvariant() switch
+        {
+            "h2" => HttpClientTransport.H2(BaseUrl),
+            "h3" => HttpClientTransport.H3(BaseUrl),
+            _ => HttpClientTransport.H1(BaseUrl),
+        };
+        return new(t);
+    }
 
     [Fact]
     public async Task EchoUnary()
