@@ -419,14 +419,21 @@ namespace EasyRpc
                 VersionPolicy = VersionPolicy,
             };
             msg.Content = new ByteArrayContent(req.Body ?? Array.Empty<byte>());
-            var ct = stream ? "application/connect+proto" : "application/proto";
-            msg.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ct);
-            // Caller-supplied metadata (auth/tenant/token).
+            // Caller-supplied metadata (auth/tenant/token) first — a caller
+            // content-type must win over the shape default (the JSON codec
+            // depends on it).
+            string? callerCt = null;
             foreach (var kv in req.Headers)
             {
-                if (kv.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)) continue;
+                if (kv.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase))
+                {
+                    callerCt = kv.Value.FirstOrDefault();
+                    continue;
+                }
                 msg.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
             }
+            var ct = callerCt ?? (stream ? "application/connect+proto" : "application/proto");
+            msg.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ct);
             return msg;
         }
 
