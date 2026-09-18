@@ -81,5 +81,31 @@ namespace EasyRpc {
       await foreach (var m in stream) { yield return CountTrailerResponse.Parser.ParseFrom(m); }
     }
 
+    public async Task<EchoBytesResponse> echoBytes(EchoBytesRequest req) {
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoBytes", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
+      if (res.Error != null) throw res.Error;
+      return EchoBytesResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async Task<SleepResponse> sleep(SleepRequest req) {
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Sleep", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
+      if (res.Error != null) throw res.Error;
+      return SleepResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async Task<EmptyResponse> empty(EmptyRequest req) {
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Empty", Body = req.ToByteArray() });
+      LastTrailers = res.Trailers;
+      if (res.Error != null) throw res.Error;
+      return EmptyResponse.Parser.ParseFrom(res.Body);
+    }
+
+    public async IAsyncEnumerable<BigStreamResponse> bigStream(BigStreamRequest req) {
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/BigStream", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
+      await foreach (var m in stream) { yield return BigStreamResponse.Parser.ParseFrom(m); }
+    }
+
   }
 }

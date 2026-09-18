@@ -87,4 +87,35 @@ public class InteropTests
         var ex = await Assert.ThrowsAsync<RpcError>(() => Client().fail(new FailRequest { Message = "nope" }));
         Assert.Equal(3, ex.Code);
     }
+
+    [Fact]
+    public async Task EchoBytesRoundTrip()
+    {
+        var data = new byte[] { 0, 1, 2, 0xff, 0xfe, 0x80 };
+        var res = await Client().echoBytes(new EchoBytesRequest { Data = ByteString.CopyFrom(data) });
+        Assert.Equal(data, res.Data.ToByteArray());
+    }
+
+    [Fact]
+    public async Task EmptyRoundTrip()
+    {
+        var res = await Client().empty(new EmptyRequest());
+        Assert.Equal(0, res.CalculateSize());
+    }
+
+    [Fact]
+    public async Task BigStreamManyFrames()
+    {
+        var idx = new System.Collections.Generic.List<int>();
+        await foreach (var c in Client().bigStream(new BigStreamRequest { Count = 4, Size = 2048 }))
+            idx.Add(c.Index);
+        Assert.Equal(new[] { 0, 1, 2, 3 }, idx);
+    }
+
+    [Fact]
+    public async Task SleepReturnsOk()
+    {
+        var res = await Client().sleep(new SleepRequest { Millis = 0 });
+        Assert.True(res.Ok);
+    }
 }
