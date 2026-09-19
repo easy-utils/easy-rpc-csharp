@@ -12,99 +12,129 @@ namespace EasyRpc {
     private readonly Transport _t;
     public ConformanceServiceClient(Transport t) { _t = t; }
 
-    public async Task<HealthResponse> health(HealthRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Health", Body = req.ToByteArray() });
+    public async Task<HealthResponse> health(HealthRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Health", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return HealthResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<HealthResponse>(res.Body, kind);
     }
 
-    public async Task<EchoResponse> echo(EchoRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Echo", Body = req.ToByteArray() });
+    public async Task<EchoResponse> echo(EchoRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Echo", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return EchoResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<EchoResponse>(res.Body, kind);
     }
 
-    public async IAsyncEnumerable<CountResponse> count(CountRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Count", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
-      await foreach (var m in stream) { yield return CountResponse.Parser.ParseFrom(m); }
+    public async IAsyncEnumerable<CountResponse> count(CountRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(true, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Count", Headers = md, Body = EasyRpc.Protocol.Frame(EasyRpc.Protocol.EncodeMsg(req, kind)) });
+      await foreach (var m in stream) { yield return EasyRpc.Protocol.DecodeMsg<CountResponse>(m, kind); }
     }
 
-    public async Task<FailResponse> fail(FailRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Fail", Body = req.ToByteArray() });
+    public async Task<FailResponse> fail(FailRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Fail", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return FailResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<FailResponse>(res.Body, kind);
     }
 
-    public async IAsyncEnumerable<StreamFailResponse> streamFail(StreamFailRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/StreamFail", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
-      await foreach (var m in stream) { yield return StreamFailResponse.Parser.ParseFrom(m); }
+    public async IAsyncEnumerable<StreamFailResponse> streamFail(StreamFailRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(true, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/StreamFail", Headers = md, Body = EasyRpc.Protocol.Frame(EasyRpc.Protocol.EncodeMsg(req, kind)) });
+      await foreach (var m in stream) { yield return EasyRpc.Protocol.DecodeMsg<StreamFailResponse>(m, kind); }
     }
 
-    public async Task<EchoMetaResponse> echoMeta(EchoMetaRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoMeta", Body = req.ToByteArray() });
+    public async Task<EchoMetaResponse> echoMeta(EchoMetaRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoMeta", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return EchoMetaResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<EchoMetaResponse>(res.Body, kind);
     }
 
-    public async Task<BigResponse> big(BigRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Big", Body = req.ToByteArray() });
+    public async Task<BigResponse> big(BigRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Big", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return BigResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<BigResponse>(res.Body, kind);
     }
 
-    public async Task<FailDetailsResponse> failDetails(FailDetailsRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/FailDetails", Body = req.ToByteArray() });
+    public async Task<FailDetailsResponse> failDetails(FailDetailsRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/FailDetails", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return FailDetailsResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<FailDetailsResponse>(res.Body, kind);
     }
 
-    public async IAsyncEnumerable<StreamFailDetailsResponse> streamFailDetails(StreamFailDetailsRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/StreamFailDetails", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
-      await foreach (var m in stream) { yield return StreamFailDetailsResponse.Parser.ParseFrom(m); }
+    public async IAsyncEnumerable<StreamFailDetailsResponse> streamFailDetails(StreamFailDetailsRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(true, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/StreamFailDetails", Headers = md, Body = EasyRpc.Protocol.Frame(EasyRpc.Protocol.EncodeMsg(req, kind)) });
+      await foreach (var m in stream) { yield return EasyRpc.Protocol.DecodeMsg<StreamFailDetailsResponse>(m, kind); }
     }
 
-    public async Task<EchoTrailerResponse> echoTrailer(EchoTrailerRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoTrailer", Body = req.ToByteArray() });
+    public async Task<EchoTrailerResponse> echoTrailer(EchoTrailerRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoTrailer", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return EchoTrailerResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<EchoTrailerResponse>(res.Body, kind);
     }
 
-    public async IAsyncEnumerable<CountTrailerResponse> countTrailer(CountTrailerRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/CountTrailer", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
-      await foreach (var m in stream) { yield return CountTrailerResponse.Parser.ParseFrom(m); }
+    public async IAsyncEnumerable<CountTrailerResponse> countTrailer(CountTrailerRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(true, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/CountTrailer", Headers = md, Body = EasyRpc.Protocol.Frame(EasyRpc.Protocol.EncodeMsg(req, kind)) });
+      await foreach (var m in stream) { yield return EasyRpc.Protocol.DecodeMsg<CountTrailerResponse>(m, kind); }
     }
 
-    public async Task<EchoBytesResponse> echoBytes(EchoBytesRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoBytes", Body = req.ToByteArray() });
+    public async Task<EchoBytesResponse> echoBytes(EchoBytesRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/EchoBytes", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return EchoBytesResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<EchoBytesResponse>(res.Body, kind);
     }
 
-    public async Task<SleepResponse> sleep(SleepRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Sleep", Body = req.ToByteArray() });
+    public async Task<SleepResponse> sleep(SleepRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Sleep", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return SleepResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<SleepResponse>(res.Body, kind);
     }
 
-    public async Task<EmptyResponse> empty(EmptyRequest req) {
-      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Empty", Body = req.ToByteArray() });
+    public async Task<EmptyResponse> empty(EmptyRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(false, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var res = await _t.Send(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/Empty", Headers = md, Body = EasyRpc.Protocol.EncodeMsg(req, kind) });
       LastTrailers = res.Trailers;
       if (res.Error != null) throw res.Error;
-      return EmptyResponse.Parser.ParseFrom(res.Body);
+      return EasyRpc.Protocol.DecodeMsg<EmptyResponse>(res.Body, kind);
     }
 
-    public async IAsyncEnumerable<BigStreamResponse> bigStream(BigStreamRequest req) {
-      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/BigStream", Body = EasyRpc.Protocol.Frame(req.ToByteArray()) });
-      await foreach (var m in stream) { yield return BigStreamResponse.Parser.ParseFrom(m); }
+    public async IAsyncEnumerable<BigStreamResponse> bigStream(BigStreamRequest req, string kind = "proto") {
+      var ct = EasyRpc.Protocol.ContentTypeFor(true, kind);
+      var md = new Dictionary<string, List<string>> { ["content-type"] = new List<string> { ct } };
+      var stream = await _t.OpenStream(new Request { Url = "/easyrpc.conformance.v1.ConformanceService/BigStream", Headers = md, Body = EasyRpc.Protocol.Frame(EasyRpc.Protocol.EncodeMsg(req, kind)) });
+      await foreach (var m in stream) { yield return EasyRpc.Protocol.DecodeMsg<BigStreamResponse>(m, kind); }
     }
 
   }

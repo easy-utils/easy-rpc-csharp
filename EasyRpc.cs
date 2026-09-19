@@ -67,6 +67,58 @@ namespace EasyRpc
             409 => 10, 504 => 4, 501 => 12, 499 => 1, _ => 13
         };
         public const byte EndStream = 0x02;
+
+        // ---- message codec (proto3 JSON) ----
+        public const string ContentTypeUnary = "application/proto";
+        public const string ContentTypeStream = "application/connect+proto";
+        public const string ContentTypeUnaryJson = "application/json";
+        public const string ContentTypeStreamJson = "application/connect+json";
+
+        /// <summary>Map a Content-Type to a codec, or null when unsupported.</summary>
+        public static string? ContentKindOf(string? contentType)
+        {
+            var ct = (contentType ?? "").Split(';')[0].Trim().ToLowerInvariant();
+            return ct switch
+            {
+                "application/proto" or "application/connect+proto" => "proto",
+                "application/json" or "application/connect+json" => "json",
+                _ => null,
+            };
+        }
+
+        /// <summary>True when the content type denotes the streaming shape.</summary>
+        public static bool IsStreamContentType(string? contentType)
+        {
+            var ct = (contentType ?? "").Split(';')[0].Trim().ToLowerInvariant();
+            return ct == "application/connect+proto" || ct == "application/connect+json";
+        }
+
+        /// <summary>The response Content-Type for a shape + codec.</summary>
+        public static string ContentTypeFor(bool stream, string kind) =>
+            kind == "json" ? (stream ? ContentTypeStreamJson : ContentTypeUnaryJson)
+                           : (stream ? ContentTypeStream : ContentTypeUnary);
+
+        /// <summary>Encode a protobuf message in the given codec.</summary>
+        public static byte[] EncodeMsg(IMessage msg, string kind)
+        {
+            if (kind == "json")
+                return Encoding.UTF8.GetBytes(JsonFormatter.Default.Format(msg));
+            return msg.ToByteArray();
+        }
+
+        /// <summary>Decode bytes into a protobuf message in the given codec
+        /// (JSON ignores unknown fields, matching Connect).</summary>
+        public static T DecodeMsg<T>(byte[] data, string kind) where T : IMessage, new()
+        {
+            if (kind == "json")
+            {
+                var settings = JsonParser.Settings.Default.WithIgnoreUnknownFields(true);
+                return new JsonParser(settings).Parse<T>(Encoding.UTF8.GetString(data));
+            }
+            var msg = new T();
+            msg.MergeFrom(data);
+            return msg;
+        }
         public static byte[] Frame(byte[] payload, bool end = false)
         {
             var outB = new List<byte>();
